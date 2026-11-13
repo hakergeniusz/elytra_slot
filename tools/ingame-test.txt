@@ -1,0 +1,53 @@
+# Elytra Slot in-game verification — horizon-ctl script (one command per line).
+# Drive it against a client launched with --control (or via `horizon-ctl launch`),
+# inside the Xvfb recipe from the memory notes. The acceptance bar:
+#   1. the slot draws beside the player model in the survival inventory
+#      (ghost when empty, the elytra when worn), with tooltip and hover;
+#   2. clicking the slot equips an elytra from the inventory and the
+#      chestplate disappears into a real inventory slot (kept, named in the
+#      tooltip); clicking again swaps them back;
+#   3. gliding works from the equipped elytra (it sits in the real chest slot);
+#   4. after a death (or a vanilla click on the chest slot) the mod lets the
+#      slot go and wears the kept chestpiece back;
+#   5. Options > Mods > Elytra Slot: Enabled OFF disables the slot; the state
+#      rows match what the slot holds;
+#   6. on a server: the same, with the restore waiting for the inventory to
+#      open (clicks go out only there).
+# Deferred (the release-rebuild fence forbids launching the client): run this
+# whole script in a later session.
+# Assumptions to adjust per run: world name, and the chestplate/elytra ids.
+launch --world ElytraSlotTest --seed 1 --wait
+state
+give minecraft:elytra 1
+give minecraft:iron_chestplate 1
+# open the survival inventory: the slot draws right of the player model
+key e tap
+sleep 1
+screenshot elytra-slot-1-ghost
+# equip: click the slot (GUI coords ≈ panel origin + (77, 8), scale ×3 on
+# 1280x720 — read the panel origin from the state/tool output first)
+# mouse left click <slot center>
+sleep 1
+screenshot elytra-slot-2-equipped
+state
+# the chest slot now holds the elytra; the chestplate waits in the inventory
+# close, glide, reopen: the slot still shows the elytra
+key e tap
+key space tap
+sleep 3
+screenshot elytra-slot-3-gliding
+key e tap
+sleep 1
+screenshot elytra-slot-4-reopened
+# unequip: click the slot again — elytra off, chestplate back on
+mouse left click <slot center>
+sleep 1
+state
+screenshot elytra-slot-5-swapped-back
+# settings: Options > Mods > Elytra Slot, toggle Enabled OFF, reopen the
+# inventory — the slot is gone (vanilla layout)
+screenshot elytra-slot-6-disabled
+# self-heal: equip through the mod, then click the chest slot vanilla-style to
+# take the elytra off — the next tick disarms the slot; clicking the mod slot
+# wears the chestpiece back and the slot re-arms on the next equip
+screenshot elytra-slot-7-selfheal

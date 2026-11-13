@@ -1,0 +1,12 @@
+[package]
+name = "horizon-elytra-slot"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Elytra Slot: a dedicated elytra slot in the survival inventory — click it to wear the elytra and fly while your chestplate is kept safe, click again to swap back. A Horizon native mod."
+publish = false
+
+# The runtime doubles as the mod's library (its tests) and the module the
+# bundle injects into the game; the helper files compile only inside it.
+[lib]
+path = "mixins/elytra_slot/runtime.rs"
