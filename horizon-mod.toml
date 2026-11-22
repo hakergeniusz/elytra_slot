@@ -1,0 +1,68 @@
+id = "elytra_slot"
+name = "Elytra Slot"
+version = "0.4.0"
+description = "The survival inventory gains an elytra slot beside the armor row: the elytra it holds is its own bay, so your chestplate stays worn beside it. It survives deaths and restarts; gliding works from the slot in single player and on LAN."
+authors = ["hakergeniusz"]
+license = "MIT"
+api = "0.2"
+side = "client"
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "f037744a79f9982c47876f49c5a3067279f88706"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
+
+# The glide check, before the game's own answer: the bay counts as worn
+# elytra (single player and LAN), so the chestplate stays worn beside it.
+[[native.mixin]]
+id = "glider"
+target = "horizon_client::game::held_items::Game<'_>::glider_worn"
+kind = "HEAD"
+cancellable = true
+helper = "src/mixins/glider.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "self" },
+]
+
+# A click on the survival inventory that lands on the mod's slot: the elytra
+# moves between the cursor and the bay as direct state (single player and
+# LAN), the bay's own stack swaps out to the cursor, and the vanilla click is
+# skipped. Every press over no engine slot reaches this hook, so the drawn
+# slot answers like a real one.
+[[native.mixin]]
+id = "click"
+target = "horizon_client::game::menu_clicks::Game<'_>::click_inventory"
+kind = "HEAD"
+cancellable = true
+helper = "src/mixins/click.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "right", ty = "bool", value = "right" },
+]
+
+# The slot itself, drawn over the plain survival inventory, after the screen
+# has drawn its own: frame, worn elytra or dimmed ghost, hover highlight and
+# tooltip. Read-only.
+[[native.mixin]]
+id = "draw"
+target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_render_post"
+kind = "HEAD"
+helper = "src/mixins/draw.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "self" },
+  { name = "batch", ty = "&mut HudBatch", value = "draw" },
+  { name = "screen", ty = "&ScreenView<'_>", value = "screen" },
+]
+
+# Every tick: the slot's self-healing — the bay refills from its config file
+# once it is empty; the file is the durable copy. The client_tick_pre hook
+# itself is implemented in src/lib.rs so this dispatch always runs.
+[[native.mixin]]
+id = "tick"
+target = "horizon_client::game::native_hooks::client_tick_pre::Game<'_>::native_client_tick_pre"
+kind = "HEAD"
+helper = "src/mixins/tick.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]

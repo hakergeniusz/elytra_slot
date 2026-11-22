@@ -5,17 +5,10 @@
 // away by a file that cannot be read.
 // Copyright (c) 2026 hakergeniusz. MIT.
 fn elytra_slot_tick(game: &mut crate::game::Game<'_>) {
-    use crate::game::elytra_slot as elytra;
-    if !game.native_on(elytra::ID) {
-        return;
-    }
-    if !elytra::setting_on(|k| game.native_setting(elytra::ID, k)) {
-        return;
-    }
-    if elytra::held().is_none()
-        && let Ok(dir) = crate::game::Game::native_config_dir()
-        && let Some(stack) = elytra::load_bay(&dir)
-    {
-        elytra::set(Some(stack));
+    let _ = game;
+    if elytra_slot::held().is_none() && elytra_slot::setting_on(elytra_slot::file_setting) {
+        if let Some(stack) = elytra_slot::load_bay() {
+            elytra_slot::set(Some(stack));
+        }
     }
 }

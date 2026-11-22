@@ -1,36 +1,38 @@
-// Elytra Slot's brain: pure standard library, no game types, so it compiles
-// and tests wherever — as this crate's library and, injected, as a module of
-// the game. Every decision the helpers act on lives here, and every one of
-// those decisions is tested below.
-//
-// The model (0.3.0): the mod's slot is its own bay beside the armor row, and
-// the elytra it holds is REAL state, not a chest-slot swap — the chestplate
-// stays worn the whole time, armor and all. The held stack lives as plain
-// text (item, count, damage, enchantments, repair cost) in ONE config file
-// that every save writes atomically and reads back before the game's stacks
-// move — 0.2.0 trusted the engine's setting writes, which in the live game
-// silently did nothing, so stored elytras died with the process. The helpers
-// turn that text back into the game's own ItemStack for drawing, the cursor
-// and the glide check.
-// One honest limitation: the glide check is a client answer, so the slot
-// flies in single player and on LAN (where the client hosts the world) and
-// stays display-only on a remote server. And the elytra in this bay does not
-// take glide wear — the vanilla wear picks a worn piece out of the armor.
-//
-// Clean-room: written for Horizon from the game's own public behavior; it
-// copies nothing from any mod.
-//
-// Copyright (c) 2026 hakergeniusz. MIT.
+//! Elytra Slot, the native-route native mod: the survival inventory's own
+//! elytra bay beside the armor row.
+//!
+//! The brain is pure standard library — no game types — so it compiles and
+//! tests wherever. Every decision the helpers act on lives here, and every
+//! one of those decisions is tested below.
+//!
+//! The model: the mod's slot is its own bay beside the armor row, and the
+//! elytra it holds is REAL state, not a chest-slot swap — the chestplate
+//! stays worn the whole time, armor and all. The held stack lives as plain
+//! text (item, count, damage, enchantments, repair cost) in ONE config file
+//! under the mod's data folder that every save writes atomically and reads
+//! back before the game's stacks move — the engine's own setting writes
+//! once silently did nothing in the live game, so stored elytras died with
+//! the process. The helpers turn that text back into the game's own
+//! ItemStack for drawing, the cursor and the glide check.
+//!
+//! One honest limitation: the glide check is a client answer, so the slot
+//! flies in single player and on LAN (where the client hosts the world) and
+//! stays display-only on a remote server. And the elytra in this bay does
+//! not take glide wear — the vanilla wear picks a worn piece out of the
+//! armor.
+//!
+//! Clean-room: written for Horizon from the game's own public behavior; it
+//! copies nothing from any mod.
+//!
+//! Copyright (c) 2026 hakergeniusz. MIT.
+
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use mod_api::Hooks;
 
 /// The mod's registry id: the settings folder and the Options > Mods row.
 pub const ID: &str = "elytra_slot";
-/// The version the row shows.
-pub const VERSION: &str = "0.3.0";
-/// The mod's description for its row.
-pub const DESCRIPTION: &str = "The survival inventory gains an elytra slot beside the armor \
-row: the elytra it holds is its own bay, so your chestplate stays worn beside it. Click to \
-put an elytra in or take it out; it survives deaths and restarts. Gliding works from the \
-slot in single player and on LAN.";
 
 /// The elytra: the only item the mod's slot takes.
 pub const ELYTRA: &str = "minecraft:elytra";
@@ -43,11 +45,10 @@ pub const SLOT_Y: f32 = 8.0;
 /// An inventory slot is 18 GUI pixels wide (16 plus the frame).
 pub const SLOT_SIZE: f32 = 18.0;
 
-/// The mod's setting file for the Enabled toggle (one file per key under the
-/// mod's data dir), which every gate re-reads.
+/// The mod's setting key for the Enabled toggle, which every gate re-reads.
 pub const SETTING_ENABLED: &str = "enabled";
 
-/// The stack the bay holds, as the plain text the setting files keep. An
+/// The stack the bay holds, as the plain text the config files keep. An
 /// elytra carries a damage bar, enchantments and a repair cost; the custom
 /// name (a styled component) is the one part the files do not keep.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -95,21 +96,17 @@ pub fn ench_of(text: &str) -> Vec<(String, u32)> {
         .collect()
 }
 
-// ---- the bay's durable copy (0.3.0): ONE file, saved verified ----
+// ---- the bay's durable copy: ONE file, saved verified ----
 //
-// 0.2.0 kept the bay in five `native_set_setting` files and trusted those
-// writes blindly; in the live game they silently did nothing, so a stored
-// elytra lived only in memory and was lost at the next launch — the mod took
-// the item and its persistence failed at once. The rule now: the file is
-// written FIRST (temp + rename), read back and parsed, and the game's stacks
-// only move when the file provably holds the new bay. A save that cannot be
-// verified keeps the cursor's item where it is and records why, and the
-// settings page says so — nothing eats an item again.
+// The file is written FIRST (temp + rename), read back and parsed, and the
+// game's stacks only move when the file provably holds the new bay. A save
+// that cannot be verified keeps the cursor's item where it is — nothing eats
+// an item.
 
-/// The bay file's name under the mod's config folder.
+/// The bay file's name under the mod's data folder.
 pub const BAY_FILE: &str = "bay.txt";
 
-/// The last save failure, for the settings page; cleared by the next good save.
+/// The last save failure, for whoever asks; cleared by the next good save.
 static SAVE_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
 /// The last save failure, if any.
@@ -157,12 +154,7 @@ pub fn bay_of(text: &str) -> Option<SlotStack> {
         .max(1);
     let damage = lines.next()?.trim().parse::<u32>().ok().unwrap_or(0);
     let ench = ench_of(lines.next().unwrap_or(""));
-    let repair = lines
-        .next()?
-        .trim()
-        .parse::<u32>()
-        .ok()
-        .unwrap_or(0);
+    let repair = lines.next()?.trim().parse::<u32>().ok().unwrap_or(0);
     Some(SlotStack {
         item,
         count,
@@ -172,27 +164,38 @@ pub fn bay_of(text: &str) -> Option<SlotStack> {
     })
 }
 
-/// The bay file's path: `<config>/elytra_slot/bay.txt`.
-pub fn bay_path(config_dir: &std::path::Path) -> std::path::PathBuf {
-    config_dir.join(ID).join(BAY_FILE)
+/// The mod's data folder: `<the client's working directory>/horizon-mods/
+/// .horizon-mod-data/elytra_slot/` — the same folder the settings store
+/// keeps the mod's toggles in, wherever the game runs.
+pub fn data_dir() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join("horizon-mods")
+        .join(".horizon-mod-data")
+        .join(ID)
 }
 
-/// Saves the bay and verifies it: the file is written atomically (temp +
-/// rename) and read back — `Ok` only when what sits on disk parses to the
-/// same stack that was asked for.
-pub fn save_bay(config_dir: &std::path::Path, stack: Option<&SlotStack>) -> Result<(), String> {
-    use std::fs;
-    let path = bay_path(config_dir);
+/// A setting file's text, as the settings store keeps it: one file per key,
+/// "true"/"false" for toggles.
+pub fn file_setting(key: &str) -> Option<String> {
+    std::fs::read_to_string(data_dir().join(key)).ok()
+}
+
+/// Saves the bay under `dir` and verifies it: the file is written atomically
+/// (temp + rename) and read back — `Ok` only when what sits on disk parses
+/// to the same stack that was asked for.
+pub fn save_bay_in(dir: &std::path::Path, stack: Option<&SlotStack>) -> Result<(), String> {
+    let path = dir.join(BAY_FILE);
     let parent = path
         .parent()
         .ok_or_else(|| "the bay file has no parent folder".to_owned())?;
     let saved = (|| -> Result<(), String> {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         let text = bay_text(stack);
         let tmp = parent.join(".bay.tmp");
-        fs::write(&tmp, text).map_err(|e| e.to_string())?;
-        fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
-        let read = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+        let read = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         match (bay_of(&read).as_ref(), stack) {
             (None, None) => Ok(()),
             (Some(a), Some(b)) if a == b => Ok(()),
@@ -203,16 +206,28 @@ pub fn save_bay(config_dir: &std::path::Path, stack: Option<&SlotStack>) -> Resu
     saved
 }
 
-/// The bay as the file holds it; a missing or junk file is None. Never an
-/// error: an unloadable file must not take the bay away from the live state.
-pub fn load_bay(config_dir: &std::path::Path) -> Option<SlotStack> {
-    let text = std::fs::read_to_string(bay_path(config_dir)).ok()?;
+/// Saves the bay in the mod's own data folder, verified.
+pub fn save_bay(stack: Option<&SlotStack>) -> Result<(), String> {
+    save_bay_in(&data_dir(), stack)
+}
+
+/// The bay as the file under `dir` holds it; a missing or junk file is None.
+/// Never an error: an unloadable file must not take the bay away from the
+/// live state.
+pub fn load_bay_in(dir: &std::path::Path) -> Option<SlotStack> {
+    let text = std::fs::read_to_string(dir.join(BAY_FILE)).ok()?;
     bay_of(&text)
 }
 
-/// Whether the mod is on. A missing file means ON — the mod exists for the
-/// slot, so installing it is asking for it; anything but `false` in the file
-/// is on, trimmed like the game reads its settings.
+/// The bay as the mod's own data folder holds it.
+pub fn load_bay() -> Option<SlotStack> {
+    load_bay_in(&data_dir())
+}
+
+/// Whether the mod is on, from the setting file a getter reads. A missing
+/// value means ON — the mod exists for the slot, so installing it is asking
+/// for it; anything but `false` is on, trimmed like the game reads its
+/// settings.
 pub fn setting_on(get: impl FnOnce(&str) -> Option<String>) -> bool {
     !matches!(get(SETTING_ENABLED).as_deref(), Some(v) if v.trim() == "false")
 }
@@ -220,8 +235,7 @@ pub fn setting_on(get: impl FnOnce(&str) -> Option<String>) -> bool {
 /// Whether the open screen is the plain survival inventory — the only one the
 /// mod's slot draws on and answers in. The inventory screen also hosts every
 /// container, station and mount window; those have a menu, a container, a
-/// station, a mount menu or the 3x3 crafting table's size, and the creative
-/// screen runs its own tab.
+/// station, a mount menu or the creative screen's own tab.
 pub fn plain_inventory(
     container_none: bool,
     station_none: bool,
@@ -239,10 +253,8 @@ pub fn over_slot(cursor: (f32, f32), origin: (f32, f32)) -> bool {
     cursor.0 >= x && cursor.0 < x + SLOT_SIZE && cursor.1 >= y && cursor.1 < y + SLOT_SIZE
 }
 
-use std::sync::Mutex;
-
 // The live bay: one Mutex-guarded Option, so the helpers never block each
-// other beyond a copy. The files are the durable copy; this is the tick's.
+// other beyond a copy. The file is the durable copy; this is the tick's.
 static SLOT: Mutex<Option<SlotStack>> = Mutex::new(None);
 
 /// The bay's stack as of now.
@@ -277,30 +289,35 @@ pub fn click_action(cursor_item: Option<&str>, bay: Option<&SlotStack>) -> Optio
     }
 }
 
-/// The settings page's rows: the toggle and the bay's state.
-pub fn page_labels(on: bool, bay: bool) -> Vec<String> {
-    vec![
-        format!("Enabled: {}", if on { "ON" } else { "OFF" }),
-        if bay {
-            "Slot: holding the elytra".to_owned()
-        } else {
-            "Slot: empty".to_owned()
-        },
-    ]
-}
+#[derive(Default)]
+pub struct Mod;
 
-/// What a click on the page's row `i` stores: the first row toggles the mod,
-/// the second is read-only. Returns the new value when the click was real.
-pub fn page_click(i: usize, on: bool) -> Option<bool> {
-    (i == 0).then_some(!on)
+#[mod_api::horizon_mod]
+impl Hooks for Mod {
+    /// The Enabled toggle on the mod's page; the bay's state shows in the
+    /// slot's own tooltip in game.
+    fn register(
+        &self,
+        registrar: &mut dyn mod_api::Registrar,
+        _: &mod_api::RegistrationContext,
+    ) {
+        let _ = registrar.register_setting(mod_api::SettingSpec::toggle(
+            SETTING_ENABLED,
+            "elytra_slot.setting.enabled",
+            true,
+        ));
+    }
+
+    /// Implemented as a no-op so the game always calls the
+    /// `native_client_tick_pre` dispatch the tick mixin lives in: the game
+    /// skips dispatches no mod listens to, and the mixin must run.
+    fn client_tick_pre(&self, _: &mut dyn mod_api::ClientHost, _: &mut mod_api::ClientTickPreEvent) {
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        bay_of, bay_path, bay_text, click_action, ench_of, ench_text, held, over_slot,
-        page_click, page_labels, save_bay, set, setting_on, Action, SlotStack, ELYTRA, SLOT_X,
-    };
+    use super::*;
 
     fn the_stack() -> SlotStack {
         SlotStack {
@@ -337,17 +354,17 @@ mod tests {
     fn the_bay_saves_verified_and_refuses_to_lie() {
         let dir = std::env::temp_dir().join(format!("elytra_slot_test_{}", std::process::id()));
         let stack = the_stack();
-        assert_eq!(save_bay(&dir, Some(&stack)), Ok(()));
-        let read = std::fs::read_to_string(bay_path(&dir)).expect("the file exists");
+        assert_eq!(save_bay_in(&dir, Some(&stack)), Ok(()));
+        let read = std::fs::read_to_string(dir.join(BAY_FILE)).expect("the file exists");
         assert_eq!(bay_of(&read).as_ref(), Some(&stack), "the file holds the stack");
         // A second save over the first, then the clear.
         let mut other = the_stack();
         other.damage = 13;
-        assert_eq!(save_bay(&dir, Some(&other)), Ok(()));
-        assert_eq!(bay_of(&std::fs::read_to_string(bay_path(&dir)).unwrap()).map(|s| s.damage), Some(13));
-        assert_eq!(save_bay(&dir, None), Ok(()));
-        assert_eq!(std::fs::read_to_string(bay_path(&dir)).unwrap(), "", "the clear empties the file");
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap().join("elytra_slot"));
+        assert_eq!(save_bay_in(&dir, Some(&other)), Ok(()));
+        assert_eq!(load_bay_in(&dir).map(|s| s.damage), Some(13));
+        assert_eq!(save_bay_in(&dir, None), Ok(()));
+        assert_eq!(std::fs::read_to_string(dir.join(BAY_FILE)).unwrap(), "", "the clear empties the file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -406,19 +423,10 @@ mod tests {
     }
 
     #[test]
-    fn the_page_shows_the_state_and_toggles() {
-        assert_eq!(
-            page_labels(true, false),
-            vec!["Enabled: ON".to_owned(), "Slot: empty".to_owned()]
-        );
-        assert_eq!(
-            page_labels(false, true)[1],
-            "Slot: holding the elytra".to_owned()
-        );
-        assert_eq!(page_click(0, true), Some(false));
-        assert_eq!(page_click(1, true), None, "the bay row is read-only");
-        assert!(setting_on(|_| None), "installed means on");
-        assert!(!setting_on(|k| (k == super::SETTING_ENABLED).then(|| "false".into())));
+    fn installed_means_on_until_declined() {
+        assert!(setting_on(|_| None), "the default must be on");
+        assert!(setting_on(|k| (k == SETTING_ENABLED).then(|| " true \n".to_owned())));
+        assert!(!setting_on(|k| (k == SETTING_ENABLED).then(|| "false".to_owned())));
         assert_eq!(SLOT_X, 77.0, "the slot sits right of the player model");
     }
 }
