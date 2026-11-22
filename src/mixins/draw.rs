@@ -3,13 +3,10 @@
 // bay's elytra in it — or the dimmed ghost when the bay is empty, the way
 // the armor ghosts draw — the vanilla hover highlight and a tooltip naming
 // the elytra and the bay's rules. Read-only: the click answers in its own
-// helper.
+// helpers. The hook is the screen draw's own frame post, which fires while
+// any screen but Playing is up, so the screen here is read off the game.
 // Copyright (c) 2026 hakergeniusz. MIT.
-fn elytra_slot_draw(
-    game: &crate::game::Game<'_>,
-    batch: &mut HudBatch,
-    screen: &ScreenView<'_>,
-) {
+fn elytra_slot_draw(game: &crate::game::Game<'_>, batch: &mut HudBatch) {
     // The bay's text state as a real stack — for the draw and the tooltip.
     fn from_text(s: &elytra_slot::SlotStack) -> horizon_client::items::ItemStack {
         let mut stack = horizon_client::items::ItemStack::new(s.item.as_str(), s.count);
@@ -27,7 +24,7 @@ fn elytra_slot_draw(
         stack
     }
 
-    if screen.id != "inventory" || screen.menu.is_some() {
+    if game.screen != crate::game::Screen::Inventory {
         return;
     }
     if !elytra_slot::setting_on(elytra_slot::file_setting) {

@@ -1,6 +1,6 @@
 id = "elytra_slot"
 name = "Elytra Slot"
-version = "0.4.0"
+version = "0.4.1"
 description = "The survival inventory gains an elytra slot beside the armor row: the elytra it holds is its own bay, so your chestplate stays worn beside it. It survives deaths and restarts; gliding works from the slot in single player and on LAN."
 authors = ["hakergeniusz"]
 license = "MIT"
@@ -25,11 +25,14 @@ bindings = [
   { name = "game", ty = "&crate::game::Game<'_>", value = "self" },
 ]
 
-# A click on the survival inventory that lands on the mod's slot: the elytra
-# moves between the cursor and the bay as direct state (single player and
-# LAN), the bay's own stack swaps out to the cursor, and the vanilla click is
-# skipped. Every press over no engine slot reaches this hook, so the drawn
-# slot answers like a real one.
+# A click on the survival inventory that lands on the mod's slot with an
+# EMPTY cursor: the bay's elytra comes out to the cursor as direct state
+# (single player and LAN), and the vanilla click is skipped. This hook is
+# the menu click's own fallback — a press that carries a stack never gets
+# here (the game's own press turns it into a quick-craft drag first), so
+# that case answers in the `press` mixin instead. Every empty-cursor press
+# over no engine slot reaches this hook, so the drawn slot answers like a
+# real one.
 [[native.mixin]]
 id = "click"
 target = "horizon_client::game::menu_clicks::Game<'_>::click_inventory"
@@ -41,22 +44,40 @@ bindings = [
   { name = "right", ty = "bool", value = "right" },
 ]
 
+# A press on the survival inventory that lands on the mod's slot while the
+# cursor already carries a stack: the game's own press starts a quick-craft
+# drag from it and returns early, so the click mixin never sees the press
+# and a carried elytra could never go into the bay. This hook takes the
+# press instead — no drag starts, nothing drops — and defers the store to
+# the tick, which holds the exclusive game this press-only hook may not
+# touch.
+[[native.mixin]]
+id = "press"
+target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_mouse_button_pressed_pre"
+kind = "HEAD"
+cancellable = true
+helper = "src/mixins/press.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "self" },
+  { name = "screen", ty = "&ScreenView<'_>", value = "screen" },
+]
+
 # The slot itself, drawn over the plain survival inventory, after the screen
 # has drawn its own: frame, worn elytra or dimmed ghost, hover highlight and
 # tooltip. Read-only.
 [[native.mixin]]
 id = "draw"
-target = "horizon_client::game::native_hooks::base::Game<'_>::native_screen_render_post"
+target = "horizon_client::game::screen_backgrounds::Game<'_>::draw_screen_with_post_hook"
 kind = "HEAD"
 helper = "src/mixins/draw.rs"
 bindings = [
   { name = "game", ty = "&crate::game::Game<'_>", value = "self" },
-  { name = "batch", ty = "&mut HudBatch", value = "draw" },
-  { name = "screen", ty = "&ScreenView<'_>", value = "screen" },
+  { name = "batch", ty = "&mut HudBatch", value = "batch" },
 ]
 
 # Every tick: the slot's self-healing — the bay refills from its config file
-# once it is empty; the file is the durable copy. The client_tick_pre hook
+# once it is empty; the file is the durable copy — and the store a press on
+# the slot deferred, where the exclusive game is. The client_tick_pre hook
 # itself is implemented in src/lib.rs so this dispatch always runs.
 [[native.mixin]]
 id = "tick"

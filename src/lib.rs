@@ -26,6 +26,7 @@
 //!
 //! Copyright (c) 2026 hakergeniusz. MIT.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -289,6 +290,44 @@ pub fn click_action(cursor_item: Option<&str>, bay: Option<&SlotStack>) -> Optio
     }
 }
 
+// ---- the store a press deferred ----
+//
+// The press hook reads the game through a shared borrow (and a carried
+// stack starts the game's quick-craft drag before the menu click's
+// fallback, so the press can never do the swap itself): it leaves a plan,
+// and the tick — which holds the exclusive game — performs the store.
+
+thread_local! {
+    /// Whether the last press on the bay asked the tick to store the
+    /// cursor's elytra. The helpers and the tick share one game thread.
+    static DEFERRED_STORE: RefCell<bool> = const { RefCell::new(false) };
+}
+
+/// Queue the deferred store for the next tick.
+pub fn defer_store() {
+    DEFERRED_STORE.with(|plan| *plan.borrow_mut() = true);
+}
+
+/// Take the queued store, if the last press left one; a second press
+/// overwrites, it does not queue up.
+pub fn take_deferred_store() -> bool {
+    DEFERRED_STORE.with(|plan| core::mem::take(&mut *plan.borrow_mut()))
+}
+
+/// Whether a deferred store may run now: the press's gates still hold and
+/// the cursor still carries the elytra it pressed with. Anything else — the
+/// screen closed, the mod turned off, a server joined, the cursor emptied
+/// or changed — drops the plan where the stack sits, so nothing moves on a
+/// stale plan.
+pub fn deferred_store_runs(
+    remote: bool,
+    on: bool,
+    plain: bool,
+    cursor_item: Option<&str>,
+) -> bool {
+    !remote && on && plain && cursor_item == Some(ELYTRA)
+}
+
 #[derive(Default)]
 pub struct Mod;
 
@@ -420,6 +459,46 @@ mod tests {
         assert!(!over_slot((95.1, 8.0), (0.0, 0.0)));
         assert!(!over_slot((77.0, 26.1), (0.0, 0.0)));
         assert!(over_slot((87.0, 18.0), (10.0, 10.0)), "the origin moves it");
+    }
+
+    #[test]
+    fn a_deferred_store_runs_only_while_the_press_still_holds() {
+        assert!(
+            deferred_store_runs(false, true, true, Some(ELYTRA)),
+            "the press's own case runs"
+        );
+        assert!(
+            !deferred_store_runs(true, true, true, Some(ELYTRA)),
+            "a server never stores"
+        );
+        assert!(
+            !deferred_store_runs(false, false, true, Some(ELYTRA)),
+            "the toggle off drops the plan"
+        );
+        assert!(
+            !deferred_store_runs(false, true, false, Some(ELYTRA)),
+            "a screen that changed drops the plan"
+        );
+        assert!(
+            !deferred_store_runs(false, true, true, None),
+            "an emptied cursor drops the plan"
+        );
+        assert!(
+            !deferred_store_runs(false, true, true, Some("minecraft:diamond_chestplate")),
+            "another stack on the cursor drops the plan"
+        );
+    }
+
+    #[test]
+    fn the_deferred_store_is_taken_once() {
+        assert!(!take_deferred_store(), "no plan until a press defers one");
+        defer_store();
+        assert!(take_deferred_store());
+        assert!(!take_deferred_store(), "the tick consumes the plan");
+        defer_store();
+        defer_store();
+        assert!(take_deferred_store(), "a second press overwrites, not queues");
+        assert!(!take_deferred_store());
     }
 
     #[test]

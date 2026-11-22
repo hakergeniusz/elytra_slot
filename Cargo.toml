@@ -1,6 +1,6 @@
 [package]
 name = "elytra_slot"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 license = "MIT"
 description = "The survival inventory gains an elytra slot beside the armor row: the chestplate stays worn, gliding works from the slot. A Horizon native mod."
